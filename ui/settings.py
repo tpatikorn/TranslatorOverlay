@@ -1,5 +1,5 @@
 import sounddevice as sd
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFormLayout, QSpinBox, QFontComboBox, QColorDialog, QSlider, QGroupBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QFormLayout, QSpinBox, QFontComboBox, QColorDialog, QSlider, QGroupBox, QGridLayout, QMessageBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
@@ -16,11 +16,13 @@ class SettingsDialog(QDialog):
     def __init__(self, current_config: dict, overlay=None, parent=None):
         super().__init__(parent)
         self.config = current_config.copy()
+        self.original_config = current_config.copy()
         self.overlay = overlay
+        self.is_button_clicked = False
         
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setFixedSize(720, 390)
+        self.setFixedSize(950, 550)
         
         # Frameless hint removed to make it a standard clickable window, 
         # but styled dark to fit the theme.
@@ -78,6 +80,7 @@ class SettingsDialog(QDialog):
         
         self.init_ui()
         self.load_values()
+        self.connect_signals()
 
     def init_ui(self):
         # Master Layout
@@ -85,13 +88,9 @@ class SettingsDialog(QDialog):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
         
-        # Horizontal layout for the two columns
-        columns_layout = QHBoxLayout()
-        columns_layout.setSpacing(20)
-        
-        # COLUMN 1: Audio & Translation Group Box
-        group_audio = QGroupBox("Audio & Languages", self)
-        group_audio.setStyleSheet("""
+        # 1. System Options Group Box (Top Section: 3 columns)
+        group_sys = QGroupBox("System Options", self)
+        group_sys.setStyleSheet("""
             QGroupBox {
                 color: #06B6D4;
                 font-family: 'Inter', sans-serif;
@@ -99,8 +98,8 @@ class SettingsDialog(QDialog):
                 font-weight: 700;
                 border: 1.5px solid #475569;
                 border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 10px;
+                margin-top: 10px;
+                padding-top: 8px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -110,30 +109,42 @@ class SettingsDialog(QDialog):
                 background-color: #1A1A22;
             }
         """)
-        audio_layout = QFormLayout(group_audio)
-        audio_layout.setSpacing(10)
-        audio_layout.setContentsMargins(15, 15, 15, 15)
+        sys_layout = QHBoxLayout(group_sys)
+        sys_layout.setSpacing(20)
+        sys_layout.setContentsMargins(15, 12, 15, 12)
         
-        # 1. Microphone Selection
+        # ASR Engine Column
+        col_asr = QVBoxLayout()
+        col_asr.addWidget(QLabel("ASR Engine:"))
+        self.combo_asr = QComboBox(self)
+        self.combo_asr.addItem("Google Web Speech (Cloud)", "google")
+        self.combo_asr.addItem("Vosk (Local Streaming)", "vosk")
+        col_asr.addWidget(self.combo_asr)
+        sys_layout.addLayout(col_asr)
+        
+        # Microphone Column
+        col_dev = QVBoxLayout()
+        col_dev.addWidget(QLabel("Input Device:"))
         self.combo_device = QComboBox(self)
         self.populate_audio_devices()
-        audio_layout.addRow("Input Device:", self.combo_device)
+        col_dev.addWidget(self.combo_device)
+        sys_layout.addLayout(col_dev)
         
-        # 2. Source Language
-        self.combo_source = QComboBox(self)
-        # 3. Target Language 1
-        self.combo_trg1 = QComboBox(self)
-        # 4. Target Language 2
-        self.combo_trg2 = QComboBox(self)
-        self.populate_languages()
+        # History Limit Column
+        col_hist = QVBoxLayout()
+        col_hist.addWidget(QLabel("History Limit:"))
+        self.combo_history_limit = QComboBox(self)
+        self.combo_history_limit.addItem("1 (Current Only)", 1)
+        self.combo_history_limit.addItem("2 Transcriptions", 2)
+        self.combo_history_limit.addItem("3 Transcriptions", 3)
+        col_hist.addWidget(self.combo_history_limit)
+        sys_layout.addLayout(col_hist)
         
-        audio_layout.addRow("Source Lang:", self.combo_source)
-        audio_layout.addRow("Target Lang 1:", self.combo_trg1)
-        audio_layout.addRow("Target Lang 2:", self.combo_trg2)
+        main_layout.addWidget(group_sys)
         
-        # COLUMN 2: Aesthetics & Layout Group Box
-        group_aesthetics = QGroupBox("Layout & Aesthetics", self)
-        group_aesthetics.setStyleSheet("""
+        # 2. Layout & Position Group Box (Middle Section: 3 columns, 2 rows)
+        group_layout = QGroupBox("Layout & Position", self)
+        group_layout.setStyleSheet("""
             QGroupBox {
                 color: #D946EF;
                 font-family: 'Inter', sans-serif;
@@ -141,8 +152,8 @@ class SettingsDialog(QDialog):
                 font-weight: 700;
                 border: 1.5px solid #475569;
                 border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 10px;
+                margin-top: 10px;
+                padding-top: 8px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -152,60 +163,32 @@ class SettingsDialog(QDialog):
                 background-color: #1A1A22;
             }
         """)
-        aes_layout = QFormLayout(group_aesthetics)
-        aes_layout.setSpacing(8)
-        aes_layout.setContentsMargins(15, 15, 15, 15)
+        pos_grid = QGridLayout(group_layout)
+        pos_grid.setSpacing(15)
+        pos_grid.setContentsMargins(15, 12, 15, 12)
         
-        # 5. Show Last Transcriptions
-        self.combo_history_limit = QComboBox(self)
-        self.combo_history_limit.addItem("1 (Current Only)", 1)
-        self.combo_history_limit.addItem("2 Transcriptions", 2)
-        self.combo_history_limit.addItem("3 Transcriptions", 3)
-        self.combo_history_limit.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
-        aes_layout.addRow("History Limit:", self.combo_history_limit)
-        
-        # 6. Transcription Alignment
+        # Row 0, Column 0: Align Position
+        lay_align = QHBoxLayout()
+        lay_align.addWidget(QLabel("Align Position:"))
         self.combo_align = QComboBox(self)
         self.combo_align.addItem("Left", "left")
         self.combo_align.addItem("Middle", "middle")
         self.combo_align.addItem("Right", "right")
-        self.combo_align.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
-        aes_layout.addRow("Align Position:", self.combo_align)
+        lay_align.addWidget(self.combo_align)
+        pos_grid.addLayout(lay_align, 0, 0)
         
-        # 7. Bottom Screen Offset
-        self.spin_offset = QSpinBox(self)
-        self.spin_offset.setRange(0, 500)
-        self.spin_offset.setSuffix(" px")
-        self.spin_offset.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
-        aes_layout.addRow("Bottom Offset:", self.spin_offset)
-        
-        # 8. Font Family & Size horizontal flow row
-        font_row = QHBoxLayout()
-        self.combo_font = QFontComboBox(self)
-        self.combo_font.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
-        self.spin_font_size = QSpinBox(self)
-        self.spin_font_size.setRange(8, 72)
-        self.spin_font_size.setSuffix(" pt")
-        self.spin_font_size.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
-        self.spin_font_size.setFixedWidth(75)
-        font_row.addWidget(self.combo_font)
-        font_row.addWidget(self.spin_font_size)
-        aes_layout.addRow("Font Profile:", font_row)
-        
-        # 9. Background Color & Text Color horizontal flow row
-        color_row = QHBoxLayout()
-        color_row.setSpacing(10)
+        # Row 0, Column 1: Background Color
+        lay_bg = QHBoxLayout()
+        lay_bg.addWidget(QLabel("BG Color:"))
         self.btn_bg_color = QPushButton("Choose BG", self)
         self.btn_bg_color.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_bg_color.clicked.connect(self.choose_bg_color)
-        self.btn_text_color = QPushButton("Choose Text", self)
-        self.btn_text_color.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_text_color.clicked.connect(self.choose_text_color)
-        color_row.addWidget(self.btn_bg_color)
-        color_row.addWidget(self.btn_text_color)
-        aes_layout.addRow("Theme Colors:", color_row)
+        lay_bg.addWidget(self.btn_bg_color)
+        pos_grid.addLayout(lay_bg, 0, 1)
         
-        # 10. Background Opacity Slider
+        # Row 0, Column 2: Background Opacity
+        lay_opacity = QHBoxLayout()
+        lay_opacity.addWidget(QLabel("BG Opacity:"))
         opacity_layout = QHBoxLayout()
         self.slider_opacity = QSlider(Qt.Orientation.Horizontal, self)
         self.slider_opacity.setRange(0, 100)
@@ -225,29 +208,153 @@ class SettingsDialog(QDialog):
         """)
         self.label_opacity_val = QLabel("78%", self)
         self.label_opacity_val.setFixedWidth(35)
-        self.label_opacity_val.setStyleSheet("color: #CBD5E1; font-weight: bold; font-size: 11px;")
         opacity_layout.addWidget(self.slider_opacity)
         opacity_layout.addWidget(self.label_opacity_val)
         
         def update_opacity_label(val):
             self.label_opacity_val.setText(f"{val}%")
             self.config["bg_opacity"] = val / 100.0
+            self.apply_values()
             
         self.slider_opacity.valueChanged.connect(update_opacity_label)
-        aes_layout.addRow("BG Opacity:", opacity_layout)
+        lay_opacity.addLayout(opacity_layout)
+        pos_grid.addLayout(lay_opacity, 0, 2)
         
-        # Add column group boxes to columns layout
-        columns_layout.addWidget(group_audio)
-        columns_layout.addWidget(group_aesthetics)
+        # Row 1, Column 0: Bottom Offset
+        lay_bottom = QHBoxLayout()
+        lay_bottom.addWidget(QLabel("Bottom Offset:"))
+        self.spin_offset = QSpinBox(self)
+        self.spin_offset.setRange(0, 500)
+        self.spin_offset.setSuffix(" px")
+        self.spin_offset.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
+        lay_bottom.addWidget(self.spin_offset)
+        pos_grid.addLayout(lay_bottom, 1, 0)
         
-        main_layout.addLayout(columns_layout)
+        # Row 1, Column 1: Left Offset
+        lay_left = QHBoxLayout()
+        lay_left.addWidget(QLabel("Left Offset:"))
+        self.spin_left_offset = QSpinBox(self)
+        self.spin_left_offset.setRange(0, 1000)
+        self.spin_left_offset.setSuffix(" px")
+        self.spin_left_offset.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
+        lay_left.addWidget(self.spin_left_offset)
+        pos_grid.addLayout(lay_left, 1, 1)
         
-        # Connect change signals for live previews
-        self.combo_source.currentIndexChanged.connect(self.update_overlay_preview)
-        self.combo_trg1.currentIndexChanged.connect(self.update_overlay_preview)
-        self.combo_trg2.currentIndexChanged.connect(self.update_overlay_preview)
-        self.combo_history_limit.currentIndexChanged.connect(self.update_overlay_preview)
-        self.combo_align.currentIndexChanged.connect(self.update_overlay_preview)
+        # Row 1, Column 2: Right Offset
+        lay_right = QHBoxLayout()
+        lay_right.addWidget(QLabel("Right Offset:"))
+        self.spin_right_offset = QSpinBox(self)
+        self.spin_right_offset.setRange(0, 1000)
+        self.spin_right_offset.setSuffix(" px")
+        self.spin_right_offset.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 4px;")
+        lay_right.addWidget(self.spin_right_offset)
+        pos_grid.addLayout(lay_right, 1, 2)
+        
+        # Make the columns exactly equal in width
+        pos_grid.setColumnStretch(0, 1)
+        pos_grid.setColumnStretch(1, 1)
+        pos_grid.setColumnStretch(2, 1)
+        
+        self.combo_align.currentIndexChanged.connect(self.update_offset_states)
+        
+        main_layout.addWidget(group_layout)
+        
+        # 3. Languages & Typography Group Box (Bottom Section: Language + Typography together)
+        group_lang_typo = QGroupBox("Languages & Typography", self)
+        group_lang_typo.setStyleSheet("""
+            QGroupBox {
+                color: #A855F7;
+                font-family: 'Inter', sans-serif;
+                font-size: 13px;
+                font-weight: 700;
+                border: 1.5px solid #475569;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 5px;
+                background-color: #1A1A22;
+            }
+        """)
+        typo_grid = QGridLayout(group_lang_typo)
+        typo_grid.setSpacing(10)
+        typo_grid.setContentsMargins(15, 12, 15, 12)
+        
+        # Table Headers
+        lbl_h_lang = QLabel("Language Line", self)
+        lbl_h_font = QLabel("Font Family", self)
+        lbl_h_size = QLabel("Font Size", self)
+        lbl_h_color = QLabel("Text Color", self)
+        
+        hdr_style = "color: #94A3B8; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: bold;"
+        lbl_h_lang.setStyleSheet(hdr_style)
+        lbl_h_font.setStyleSheet(hdr_style)
+        lbl_h_size.setStyleSheet(hdr_style)
+        lbl_h_color.setStyleSheet(hdr_style)
+        
+        typo_grid.addWidget(lbl_h_lang, 0, 0)
+        typo_grid.addWidget(lbl_h_font, 0, 1)
+        typo_grid.addWidget(lbl_h_size, 0, 2)
+        typo_grid.addWidget(lbl_h_color, 0, 3)
+        
+        # Row 1: Original Language
+        self.combo_source = QComboBox(self)
+        self.combo_font_src = QFontComboBox(self)
+        self.combo_font_src.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.spin_size_src = QSpinBox(self)
+        self.spin_size_src.setRange(8, 72)
+        self.spin_size_src.setSuffix(" pt")
+        self.spin_size_src.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.btn_color_src = QPushButton("Choose Color", self)
+        self.btn_color_src.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_color_src.clicked.connect(self.choose_color_src)
+        
+        typo_grid.addWidget(self.combo_source, 1, 0)
+        typo_grid.addWidget(self.combo_font_src, 1, 1)
+        typo_grid.addWidget(self.spin_size_src, 1, 2)
+        typo_grid.addWidget(self.btn_color_src, 1, 3)
+        
+        # Row 2: Translation Language 1
+        self.combo_trg1 = QComboBox(self)
+        self.combo_font_trg1 = QFontComboBox(self)
+        self.combo_font_trg1.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.spin_size_trg1 = QSpinBox(self)
+        self.spin_size_trg1.setRange(8, 72)
+        self.spin_size_trg1.setSuffix(" pt")
+        self.spin_size_trg1.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.btn_color_trg1 = QPushButton("Choose Color", self)
+        self.btn_color_trg1.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_color_trg1.clicked.connect(self.choose_color_trg1)
+        
+        typo_grid.addWidget(self.combo_trg1, 2, 0)
+        typo_grid.addWidget(self.combo_font_trg1, 2, 1)
+        typo_grid.addWidget(self.spin_size_trg1, 2, 2)
+        typo_grid.addWidget(self.btn_color_trg1, 2, 3)
+        
+        # Row 3: Translation Language 2
+        self.combo_trg2 = QComboBox(self)
+        self.combo_font_trg2 = QFontComboBox(self)
+        self.combo_font_trg2.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.spin_size_trg2 = QSpinBox(self)
+        self.spin_size_trg2.setRange(8, 72)
+        self.spin_size_trg2.setSuffix(" pt")
+        self.spin_size_trg2.setStyleSheet("background-color: #2D2D39; color: #F8FAFC; border: 1px solid #475569; border-radius: 6px; padding: 2px;")
+        self.btn_color_trg2 = QPushButton("Choose Color", self)
+        self.btn_color_trg2.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_color_trg2.clicked.connect(self.choose_color_trg2)
+        
+        typo_grid.addWidget(self.combo_trg2, 3, 0)
+        typo_grid.addWidget(self.combo_font_trg2, 3, 1)
+        typo_grid.addWidget(self.spin_size_trg2, 3, 2)
+        typo_grid.addWidget(self.btn_color_trg2, 3, 3)
+        
+        self.populate_languages()
+        
+        main_layout.addWidget(group_lang_typo)
         
         # Spacer
         main_layout.addStretch()
@@ -258,11 +365,7 @@ class SettingsDialog(QDialog):
         
         btn_cancel = QPushButton("Cancel", self)
         btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_cancel.clicked.connect(self.reject)
-        
-        btn_apply = QPushButton("Apply", self)
-        btn_apply.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_apply.clicked.connect(self.apply_values)
+        btn_cancel.clicked.connect(self.cancel_clicked)
         
         btn_save = QPushButton("Save Settings", self)
         btn_save.setObjectName("btn_save")
@@ -271,7 +374,6 @@ class SettingsDialog(QDialog):
         
         btn_layout.addWidget(btn_cancel)
         btn_layout.addStretch()
-        btn_layout.addWidget(btn_apply)
         btn_layout.addWidget(btn_save)
         
         main_layout.addLayout(btn_layout)
@@ -291,31 +393,55 @@ class SettingsDialog(QDialog):
             print(f"Error querying audio devices: {e}")
 
     def populate_languages(self):
-        """Fetch languages list from translator and populate dropdowns."""
+        """Fetch languages list from translator and populate dropdowns with convenience shortcuts."""
         langs_dict = get_languages()
         
         # Sort languages alphabetically by name
         sorted_langs = sorted(langs_dict.items(), key=lambda x: x[0].lower())
         
-        # Source languages combo box (auto detection + individual codes)
+        # Popular convenient languages to pin to the top
+        popular_langs = [
+            ("Thai", "th"),
+            ("English", "en"),
+            ("Chinese (Simplified)", "zh-CN"),
+            ("Chinese (Traditional)", "zh-TW")
+        ]
+        
+        # 1. Source languages combo box (Auto Detect + Popular + Alphabetical list)
         self.combo_source.clear()
         self.combo_source.addItem("Auto Detect Language", "auto")
+        for name, code in popular_langs:
+            self.combo_source.addItem(f"★ {name}", code)
+        self.combo_source.insertSeparator(self.combo_source.count())
         for name, code in sorted_langs:
             self.combo_source.addItem(name.capitalize(), code)
             
-        # Target 1 language combo box (requires a selected language, no auto)
+        # 2. Target 1 language combo box (None + Popular + Alphabetical list)
         self.combo_trg1.clear()
+        self.combo_trg1.addItem("None", "")
+        for name, code in popular_langs:
+            self.combo_trg1.addItem(f"★ {name}", code)
+        self.combo_trg1.insertSeparator(self.combo_trg1.count())
         for name, code in sorted_langs:
             self.combo_trg1.addItem(name.capitalize(), code)
             
-        # Target 2 language combo box (can be None)
+        # 3. Target 2 language combo box (None + Popular + Alphabetical list)
         self.combo_trg2.clear()
         self.combo_trg2.addItem("None", "")
+        for name, code in popular_langs:
+            self.combo_trg2.addItem(f"★ {name}", code)
+        self.combo_trg2.insertSeparator(self.combo_trg2.count())
         for name, code in sorted_langs:
             self.combo_trg2.addItem(name.capitalize(), code)
 
     def load_values(self):
         """Load current configuration values into the dropdown selections."""
+        # 0. ASR Engine
+        asr_engine = self.config.get("asr_engine", "google")
+        idx = self.combo_asr.findData(asr_engine)
+        if idx != -1:
+            self.combo_asr.setCurrentIndex(idx)
+
         # 1. Device
         device_index = self.config.get("device_index")
         idx = self.combo_device.findData(device_index)
@@ -352,38 +478,60 @@ class SettingsDialog(QDialog):
         if idx != -1:
             self.combo_history_limit.setCurrentIndex(idx)
             
-        # 6. Bottom Screen Offset
+        # 6. Screen Offsets (Bottom, Left, Right)
         bottom_offset = self.config.get("bottom_offset", 35)
         self.spin_offset.setValue(bottom_offset)
         
-        # 7. Font Family
-        font_family = self.config.get("font_family", "Segoe UI")
-        self.combo_font.setCurrentFont(QFont(font_family))
+        left_offset = self.config.get("left_offset", 35)
+        self.spin_left_offset.setValue(left_offset)
         
-        # 8. Font Size
-        font_size = self.config.get("font_size", 19)
-        self.spin_font_size.setValue(font_size)
+        right_offset = self.config.get("right_offset", 35)
+        self.spin_right_offset.setValue(right_offset)
         
-        # 9. Background Color
+        # 7. Original Styling
+        src_font_family = self.config.get("src_font_family", "Segoe UI")
+        self.combo_font_src.setCurrentFont(QFont(src_font_family))
+        src_font_size = self.config.get("src_font_size", 15)
+        self.spin_size_src.setValue(src_font_size)
+        src_color = self.config.get("src_text_color", "#000000")
+        self.update_color_button_style(self.btn_color_src, QColor(src_color), src_color)
+        
+        # 8. Translation 1 Styling
+        trg1_font_family = self.config.get("trg1_font_family", "Segoe UI")
+        self.combo_font_trg1.setCurrentFont(QFont(trg1_font_family))
+        trg1_font_size = self.config.get("trg1_font_size", 19)
+        self.spin_size_trg1.setValue(trg1_font_size)
+        trg1_color = self.config.get("trg1_text_color", "#000000")
+        self.update_color_button_style(self.btn_color_trg1, QColor(trg1_color), trg1_color)
+        
+        # 9. Translation 2 Styling
+        trg2_font_family = self.config.get("trg2_font_family", "Segoe UI")
+        self.combo_font_trg2.setCurrentFont(QFont(trg2_font_family))
+        trg2_font_size = self.config.get("trg2_font_size", 19)
+        self.spin_size_trg2.setValue(trg2_font_size)
+        trg2_color = self.config.get("trg2_text_color", "#000000")
+        self.update_color_button_style(self.btn_color_trg2, QColor(trg2_color), trg2_color)
+        
+        # 10. Background Color
         bg_color = self.config.get("bg_color", "rgba(255, 255, 255, 0.78)")
         bg_qcolor = self.parse_rgba_string(bg_color)
         self.update_color_button_style(self.btn_bg_color, bg_qcolor, bg_color)
         
-        # 10. Text Color
-        text_color = self.config.get("text_color", "#000000")
-        text_qcolor = QColor(text_color)
-        self.update_color_button_style(self.btn_text_color, text_qcolor, text_color)
-
         # 11. Opacity Slider
         bg_opacity = self.config.get("bg_opacity", 0.78)
         self.slider_opacity.setValue(int(bg_opacity * 100))
         self.label_opacity_val.setText(f"{int(bg_opacity * 100)}%")
+        
+        # Update offset states
+        self.update_offset_states()
         
         # Update live preview on overlay
         self.update_overlay_preview()
 
     def save_values(self):
         """Save form options to config dict and accept the dialog."""
+        self.is_button_clicked = True
+        self.config["asr_engine"] = self.combo_asr.currentData()
         self.config["device_index"] = self.combo_device.currentData()
         self.config["source_lang"] = self.combo_source.currentData()
         self.config["target_lang1"] = self.combo_trg1.currentData()
@@ -391,14 +539,80 @@ class SettingsDialog(QDialog):
         self.config["transcription_align"] = self.combo_align.currentData()
         self.config["history_limit"] = self.combo_history_limit.currentData()
         self.config["bottom_offset"] = self.spin_offset.value()
-        self.config["font_family"] = self.combo_font.currentFont().family()
-        self.config["font_size"] = self.spin_font_size.value()
+        self.config["left_offset"] = self.spin_left_offset.value()
+        self.config["right_offset"] = self.spin_right_offset.value()
         self.config["bg_opacity"] = self.slider_opacity.value() / 100.0
+        
+        # Typography settings
+        self.config["src_font_family"] = self.combo_font_src.currentFont().family()
+        self.config["src_font_size"] = self.spin_size_src.value()
+        self.config["trg1_font_family"] = self.combo_font_trg1.currentFont().family()
+        self.config["trg1_font_size"] = self.spin_size_trg1.value()
+        self.config["trg2_font_family"] = self.combo_font_trg2.currentFont().family()
+        self.config["trg2_font_size"] = self.spin_size_trg2.value()
         
         self.accept()
 
+    def cancel_clicked(self):
+        """Set explicit click flag and reject the settings dialog."""
+        self.is_button_clicked = True
+        self.reject()
+
+    def closeEvent(self, event):
+        """Prompt user to save or discard changes when closing Settings via [x] or Escape key."""
+        if getattr(self, "is_button_clicked", False):
+            event.accept()
+            return
+            
+        # Style and build the confirmation dialog
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Unsaved Changes")
+        msg_box.setText("You have unsaved changes. Do you want to save or discard them?")
+        
+        # Apply unified dark theme to confirmation box
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #1A1A22;
+                color: #F8FAFC;
+                font-family: 'Inter', sans-serif;
+            }
+            QLabel {
+                color: #F8FAFC;
+                font-size: 13px;
+            }
+            QPushButton {
+                background-color: #3B82F6;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                min-width: 70px;
+            }
+            QPushButton:hover {
+                background-color: #2563EB;
+            }
+        """)
+        
+        save_btn = msg_box.addButton(QMessageBox.StandardButton.Save)
+        discard_btn = msg_box.addButton(QMessageBox.StandardButton.Discard)
+        cancel_btn = msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        
+        msg_box.setDefaultButton(save_btn)
+        msg_box.exec()
+        
+        clicked = msg_box.clickedButton()
+        if clicked == save_btn:
+            self.save_values()
+            event.accept()
+        elif clicked == discard_btn:
+            self.cancel_clicked()
+            event.accept()
+        else:
+            event.ignore()
+
     def apply_values(self):
         """Emit config_applied signal with the current unsaved configurations to preview them."""
+        self.config["asr_engine"] = self.combo_asr.currentData()
         self.config["device_index"] = self.combo_device.currentData()
         self.config["source_lang"] = self.combo_source.currentData()
         self.config["target_lang1"] = self.combo_trg1.currentData()
@@ -406,9 +620,17 @@ class SettingsDialog(QDialog):
         self.config["transcription_align"] = self.combo_align.currentData()
         self.config["history_limit"] = self.combo_history_limit.currentData()
         self.config["bottom_offset"] = self.spin_offset.value()
-        self.config["font_family"] = self.combo_font.currentFont().family()
-        self.config["font_size"] = self.spin_font_size.value()
+        self.config["left_offset"] = self.spin_left_offset.value()
+        self.config["right_offset"] = self.spin_right_offset.value()
         self.config["bg_opacity"] = self.slider_opacity.value() / 100.0
+        
+        # Typography settings
+        self.config["src_font_family"] = self.combo_font_src.currentFont().family()
+        self.config["src_font_size"] = self.spin_size_src.value()
+        self.config["trg1_font_family"] = self.combo_font_trg1.currentFont().family()
+        self.config["trg1_font_size"] = self.spin_size_trg1.value()
+        self.config["trg2_font_family"] = self.combo_font_trg2.currentFont().family()
+        self.config["trg2_font_size"] = self.spin_size_trg2.value()
         
         self.config_applied.emit(self.config)
 
@@ -432,19 +654,64 @@ class SettingsDialog(QDialog):
             self.update_color_button_style(self.btn_bg_color, color, rgba_str)
             # Update opacity slider to match color alpha
             self.slider_opacity.setValue(int((color.alpha() / 255.0) * 100))
+            self.apply_values()
 
-    def choose_text_color(self):
-        """Open a color dialog to choose the overlay text color."""
-        curr_hex = self.config.get("text_color", "#000000")
-        initial_color = QColor(curr_hex)
-        
+    def update_offset_states(self):
+        """No-op to keep Left/Right screen offsets always enabled and editable."""
+        pass
+
+    def choose_color_src(self):
+        curr_hex = self.config.get("src_text_color", "#000000")
         dialog = QColorDialog(self)
-        dialog.setCurrentColor(initial_color)
+        dialog.setCurrentColor(QColor(curr_hex))
         if dialog.exec():
             color = dialog.currentColor()
             hex_str = color.name()
-            self.config["text_color"] = hex_str
-            self.update_color_button_style(self.btn_text_color, color, hex_str)
+            self.config["src_text_color"] = hex_str
+            self.update_color_button_style(self.btn_color_src, color, hex_str)
+            self.apply_values()
+
+    def choose_color_trg1(self):
+        curr_hex = self.config.get("trg1_text_color", "#000000")
+        dialog = QColorDialog(self)
+        dialog.setCurrentColor(QColor(curr_hex))
+        if dialog.exec():
+            color = dialog.currentColor()
+            hex_str = color.name()
+            self.config["trg1_text_color"] = hex_str
+            self.update_color_button_style(self.btn_color_trg1, color, hex_str)
+            self.apply_values()
+
+    def choose_color_trg2(self):
+        curr_hex = self.config.get("trg2_text_color", "#000000")
+        dialog = QColorDialog(self)
+        dialog.setCurrentColor(QColor(curr_hex))
+        if dialog.exec():
+            color = dialog.currentColor()
+            hex_str = color.name()
+            self.config["trg2_text_color"] = hex_str
+            self.update_color_button_style(self.btn_color_trg2, color, hex_str)
+            self.apply_values()
+
+    def connect_signals(self):
+        """Connect all interactive controls to apply live changes immediately to the overlay."""
+        self.combo_asr.currentIndexChanged.connect(self.apply_values)
+        self.combo_device.currentIndexChanged.connect(self.apply_values)
+        self.combo_source.currentIndexChanged.connect(self.apply_values)
+        self.combo_trg1.currentIndexChanged.connect(self.apply_values)
+        self.combo_trg2.currentIndexChanged.connect(self.apply_values)
+        self.combo_history_limit.currentIndexChanged.connect(self.apply_values)
+        self.combo_align.currentIndexChanged.connect(self.apply_values)
+        self.spin_offset.valueChanged.connect(self.apply_values)
+        self.spin_left_offset.valueChanged.connect(self.apply_values)
+        self.spin_right_offset.valueChanged.connect(self.apply_values)
+        
+        self.combo_font_src.currentFontChanged.connect(self.apply_values)
+        self.spin_size_src.valueChanged.connect(self.apply_values)
+        self.combo_font_trg1.currentFontChanged.connect(self.apply_values)
+        self.spin_size_trg1.valueChanged.connect(self.apply_values)
+        self.combo_font_trg2.currentFontChanged.connect(self.apply_values)
+        self.spin_size_trg2.valueChanged.connect(self.apply_values)
 
     def parse_rgba_string(self, rgba_str: str) -> QColor:
         """Parse 'rgba(r, g, b, a)' or hex strings into a QColor object."""

@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtGui import QGuiApplication, QFont, QColor
+from PyQt6.QtCore import Qt, QPoint, QRect, pyqtSignal
+from PyQt6.QtGui import QGuiApplication, QFont, QColor, QFontMetrics
 
 class SubtitleBlock(QFrame):
     """
@@ -40,6 +40,8 @@ class SubtitleOverlay(QWidget):
     Translucent, frameless, and click-through window for displaying subtitle overlays.
     Supports source text and up to two target translations.
     """
+    geometry_updated = pyqtSignal(QRect)
+
     def __init__(self, position_name: str = "bottom-center"):
         super().__init__()
         self.current_position = position_name
@@ -73,18 +75,16 @@ class SubtitleOverlay(QWidget):
         self.container.setStyleSheet("background: transparent; border: none;")
         
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(15, 0, 15, 0)
+        self.container_layout.setContentsMargins(15, 8, 15, 8)
         self.container_layout.setSpacing(10)
         
         # Pre-create 3 subtitle blocks
         self.blocks = [SubtitleBlock(self.container) for _ in range(3)]
         
-        # Add stretches and blocks to layout
-        self.container_layout.addStretch()
+        # Add blocks to layout (no expanding stretches so layout wraps blocks tightly)
         for block in self.blocks:
             self.container_layout.addWidget(block, alignment=Qt.AlignmentFlag.AlignCenter)
             block.hide()
-        self.container_layout.addStretch()
         
         # Show initial greeting block
         self.blocks[0].label_src.setText("Subtitle Overlay Ready")
@@ -122,7 +122,9 @@ class SubtitleOverlay(QWidget):
             self.history.pop(0)
             
         # Rerender current state
-        if getattr(self, "current_status_msg", None) is not None:
+        if getattr(self, "is_in_preview_mode", False) and getattr(self, "preview_text", None) is not None:
+            self.show_status_message(self.preview_text[0], self.preview_text[1])
+        elif getattr(self, "current_status_msg", None) is not None:
             self.show_status_message(self.current_status_msg[0], self.current_status_msg[1])
         else:
             self.render_history()
@@ -166,6 +168,21 @@ class SubtitleOverlay(QWidget):
             print(f"Error applying opacity to text {color_str}: {e}")
         return color_str
 
+    def _update_label_height(self, label: QLabel, text: str, font: QFont, max_width: int):
+        """Enforce exact height on a word-wrapped label using QFontMetrics to prevent clipping/overlapping."""
+        if not text.strip():
+            label.setFixedHeight(0)
+            return
+        
+        fm = QFontMetrics(font)
+        rect = fm.boundingRect(
+            QRect(0, 0, max_width, 10000),
+            Qt.TextFlag.TextWordWrap,
+            text
+        )
+        # Add 2 pixels safety padding
+        label.setFixedHeight(rect.height() + 2)
+
     def _style_block(self, block, is_current: bool):
         """Dynamically style an individual block frame and its internal labels."""
         if not getattr(self, "style_config", None):
@@ -173,13 +190,6 @@ class SubtitleOverlay(QWidget):
             
         bg_color = self.style_config.get("bg_color", "rgba(255, 255, 255, 0.78)")
         bg_opacity = float(self.style_config.get("bg_opacity", 0.78))
-        text_color = self.style_config.get("text_color", "#000000")
-        font_family = self.style_config.get("font_family", "Segoe UI")
-        font_size = int(self.style_config.get("font_size", 19))
-        
-        # Historical blocks fade text to 50% opacity
-        text_opacity = 1.0 if is_current else 0.5
-        applied_text_color = self._apply_opacity_to_text(text_color, text_opacity)
         
         applied_bg_color = self._apply_opacity_to_color(bg_color, bg_opacity)
         
@@ -197,37 +207,62 @@ class SubtitleOverlay(QWidget):
             }}
         """)
         
-        src_font_size = max(10, font_size - 4)
+        # Historical blocks fade text to 50% opacity
+        text_opacity = 1.0 if is_current else 0.5
         
+        # 1. Original (Source) Text Styling
+        src_font_family = self.style_config.get("src_font_family", "Segoe UI")
+        src_font_size = int(self.style_config.get("src_font_size", 15))
+        src_color = self.style_config.get("src_text_color", "#000000")
+        applied_src_color = self._apply_opacity_to_text(src_color, text_opacity)
+        
+        src_font = QFont(src_font_family, src_font_size)
+        src_font.setWeight(QFont.Weight.Medium)
+        block.label_src.setFont(src_font)
         block.label_src.setAlignment(self.text_alignment)
         block.label_src.setStyleSheet(f"""
-            color: {applied_text_color};
-            font-family: '{font_family}', 'Outfit', 'Inter', 'Segoe UI', sans-serif;
-            font-size: {src_font_size}px;
-            font-weight: 500;
+            color: {applied_src_color};
             background: transparent;
             border: none;
         """)
         
+        self._update_label_height(block.label_src, block.label_src.text(), src_font, 880)
+        
+        # 2. Translation 1 Text Styling
+        trg1_font_family = self.style_config.get("trg1_font_family", "Segoe UI")
+        trg1_font_size = int(self.style_config.get("trg1_font_size", 19))
+        trg1_color = self.style_config.get("trg1_text_color", "#000000")
+        applied_trg1_color = self._apply_opacity_to_text(trg1_color, text_opacity)
+        
+        trg1_font = QFont(trg1_font_family, trg1_font_size)
+        trg1_font.setBold(True)
+        block.label_trg1.setFont(trg1_font)
         block.label_trg1.setAlignment(self.text_alignment)
         block.label_trg1.setStyleSheet(f"""
-            color: {applied_text_color};
-            font-family: '{font_family}', 'Outfit', 'Inter', 'Segoe UI', sans-serif;
-            font-size: {font_size}px;
-            font-weight: 700;
+            color: {applied_trg1_color};
             background: transparent;
             border: none;
         """)
         
+        self._update_label_height(block.label_trg1, block.label_trg1.text(), trg1_font, 880)
+        
+        # 3. Translation 2 Text Styling
+        trg2_font_family = self.style_config.get("trg2_font_family", "Segoe UI")
+        trg2_font_size = int(self.style_config.get("trg2_font_size", 19))
+        trg2_color = self.style_config.get("trg2_text_color", "#000000")
+        applied_trg2_color = self._apply_opacity_to_text(trg2_color, text_opacity)
+        
+        trg2_font = QFont(trg2_font_family, trg2_font_size)
+        trg2_font.setBold(True)
+        block.label_trg2.setFont(trg2_font)
         block.label_trg2.setAlignment(self.text_alignment)
         block.label_trg2.setStyleSheet(f"""
-            color: {applied_text_color};
-            font-family: '{font_family}', 'Outfit', 'Inter', 'Segoe UI', sans-serif;
-            font-size: {font_size}px;
-            font-weight: 700;
+            color: {applied_trg2_color};
             background: transparent;
             border: none;
         """)
+        
+        self._update_label_height(block.label_trg2, block.label_trg2.text(), trg2_font, 880)
 
     def get_current_text(self) -> tuple:
         """Return the current source and translations displayed on the overlay."""
@@ -239,23 +274,41 @@ class SubtitleOverlay(QWidget):
             
         return ("Subtitle Overlay Ready", ["", ""])
 
-    def update_text(self, src: str, translations: list, is_preview: bool = False):
+    def exit_preview_mode(self):
+        """Restore actual runtime history/status rendering and exit preview mode."""
+        self.is_in_preview_mode = False
+        if getattr(self, "current_status_msg", None) is not None:
+            self.show_status_message(self.current_status_msg[0], self.current_status_msg[1])
+        else:
+            self.render_history()
+        self.reposition(self.current_position)
+
+    def update_text(self, src: str, translations: list, is_final: bool = True, is_preview: bool = False):
         """
         Update the subtitle text. Appends real transcriptions to history,
         or displays temporary status messages. Bypasses history during previews.
         """
         is_status = is_preview or src in ("...", "Session Paused", "Session Resumed", "Subtitle Overlay Ready") or not src.strip()
         
+        if is_preview:
+            self.is_in_preview_mode = True
+            self.preview_text = (src, translations)
+        else:
+            self.is_in_preview_mode = False
+            
         if is_status:
             if not is_preview:
                 self.current_status_msg = (src, translations)
             self.show_status_message(src, translations)
         else:
             self.current_status_msg = None
-            self.history.append((src, translations))
-            while len(self.history) > self.history_limit:
-                self.history.pop(0)
-            self.render_history()
+            if is_final:
+                self.history.append((src, translations))
+                while len(self.history) > self.history_limit:
+                    self.history.pop(0)
+                self.render_history()
+            else:
+                self.render_history(partial_src=src, partial_trans=translations)
             
         self.reposition(self.current_position)
 
@@ -271,6 +324,7 @@ class SubtitleOverlay(QWidget):
                     block.label_trg1.setText(t1)
                     block.label_trg1.show()
                 else:
+                    block.label_trg1.setText("")
                     block.label_trg1.hide()
                     
                 t2 = translations[1] if len(translations) > 1 else ""
@@ -278,6 +332,7 @@ class SubtitleOverlay(QWidget):
                     block.label_trg2.setText(t2)
                     block.label_trg2.show()
                 else:
+                    block.label_trg2.setText("")
                     block.label_trg2.hide()
                     
                 self._style_block(block, is_current=True)
@@ -285,13 +340,20 @@ class SubtitleOverlay(QWidget):
             else:
                 block.hide()
 
-    def render_history(self):
-        """Render active history items onto subtitle blocks."""
-        H = len(self.history)
+    def render_history(self, partial_src=None, partial_trans=None):
+        """Render active history items onto subtitle blocks, optionally appending a partial block."""
+        items = list(self.history)
+        if partial_src is not None:
+            items.append((partial_src, partial_trans or ["", ""]))
+            
+        while len(items) > self.history_limit:
+            items.pop(0)
+            
+        H = len(items)
         for i in range(3):
             block = self.blocks[i]
             if i < H:
-                hist_src, hist_trans = self.history[i]
+                hist_src, hist_trans = items[i]
                 is_current = (i == H - 1)
                 
                 block.label_src.setText(hist_src)
@@ -302,6 +364,7 @@ class SubtitleOverlay(QWidget):
                     block.label_trg1.setText(ht1)
                     block.label_trg1.show()
                 else:
+                    block.label_trg1.setText("")
                     block.label_trg1.hide()
                     
                 ht2 = hist_trans[1] if len(hist_trans) > 1 else ""
@@ -309,6 +372,7 @@ class SubtitleOverlay(QWidget):
                     block.label_trg2.setText(ht2)
                     block.label_trg2.show()
                 else:
+                    block.label_trg2.setText("")
                     block.label_trg2.hide()
                     
                 self._style_block(block, is_current)
@@ -320,10 +384,16 @@ class SubtitleOverlay(QWidget):
         """
         Position the overlay onto one of six screen regions.
         Always forces bottom-center positioning for subtitles.
-        Takes exactly 10% vertical space per active history item.
+        Adapts height dynamically to the contents using adjustSize().
         """
         self.current_position = "bottom-center"
-        position_name = "bottom-center"
+        
+        # Set fixed width first so layout calculates word-wrapped heights based on 950px width
+        self.setFixedWidth(950)
+        
+        # Recalculate size to fit content
+        self.adjustSize()
+        height = self.height()
         
         screen = QGuiApplication.primaryScreen()
         geometry = screen.availableGeometry()
@@ -332,13 +402,22 @@ class SubtitleOverlay(QWidget):
         screen_x = geometry.x()
         screen_y = geometry.y()
         
-        # Take screen vertical space proportional to history limit (10% per item)
-        width = 950
-        height = int(screen_height * 0.10) * self.history_limit
         margin = self.bottom_offset
+        left_offset = int(self.style_config.get("left_offset", 35)) if getattr(self, "style_config", None) else 35
+        right_offset = int(self.style_config.get("right_offset", 35)) if getattr(self, "style_config", None) else 35
+        align_str = self.style_config.get("transcription_align", "middle") if getattr(self, "style_config", None) else "middle"
         
-        # Calculate coordinates (always bottom-center but respecting bottom_offset)
-        x = screen_x + (screen_width - width) // 2
-        y = screen_y + screen_height - height - margin
+        if align_str == "left":
+            x = screen_x + left_offset
+        elif align_str == "right":
+            x = screen_x + screen_width - 950 - right_offset
+        else:  # middle
+            x = screen_x + (screen_width - 950) // 2
             
-        self.setGeometry(x, y, width, height)
+        y = screen_y + screen_height - height - margin
+        
+        # Move and resize the window
+        self.setGeometry(x, y, 950, height)
+        
+        # Emit signal to inform menu of geometry changes
+        self.geometry_updated.emit(self.geometry())

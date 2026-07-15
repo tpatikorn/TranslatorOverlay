@@ -34,9 +34,9 @@ class SessionLogger:
         with self.lock:
             self.is_paused = paused
 
-    def log(self, src_text: str, trg1_text: str = "", trg2_text: str = ""):
+    def log(self, src_text: str, src_lang: str, trg1_text: str = "", trg1_lang: str = "", trg2_text: str = "", trg2_lang: str = ""):
         """
-        Write a log entry with [HH:MM:SS] timestamp and translations.
+        Write a log entry with [HH:MM:SS][LANG] format.
         Does nothing if logging is currently paused.
         """
         with self.lock:
@@ -52,15 +52,21 @@ class SessionLogger:
 
             try:
                 with open(self.filename, "a", encoding="utf-8") as f:
-                    f.write(f"{time_str}\n")
-                    f.write(f"[SRC]: {src_text.strip()}\n")
+                    # Log source text
+                    src_code = src_lang.upper() if src_lang else "SRC"
+                    f.write(f"{time_str}[{src_code}]: {src_text.strip()}\n")
 
-                    if trg1_text and trg1_text.strip():
-                        f.write(f"[TRG1]: {trg1_text.strip()}\n")
+                    # Log Translation 1 (if any)
+                    if trg1_text and trg1_text.strip() and trg1_lang:
+                        trg1_code = trg1_lang.upper()
+                        f.write(f"{time_str}[{trg1_code}]: {trg1_text.strip()}\n")
 
-                    if trg2_text and trg2_text.strip():
-                        f.write(f"[TRG2]: {trg2_text.strip()}\n")
+                    # Log Translation 2 (if any)
+                    if trg2_text and trg2_text.strip() and trg2_lang:
+                        trg2_code = trg2_lang.upper()
+                        f.write(f"{time_str}[{trg2_code}]: {trg2_text.strip()}\n")
 
-                    f.write("-" * 40 + "\n")
+                    # Add empty line as separator
+                    f.write("\n")
             except Exception as e:
                 print(f"Failed writing to log file {self.filename}: {e}")

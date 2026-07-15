@@ -10,12 +10,24 @@ DEFAULT_CONFIG = {
     "transcription_align": "middle",
     "device_index": None,
     "bottom_offset": 35,
+    "left_offset": 35,
+    "right_offset": 35,
     "bg_color": "rgba(255, 255, 255, 0.78)",
     "bg_opacity": 0.78,
     "text_color": "#000000",
     "font_family": "Segoe UI",
     "font_size": 19,
-    "history_limit": 1
+    "history_limit": 1,
+    "asr_engine": "google",
+    "src_font_family": "Segoe UI",
+    "src_font_size": 15,
+    "src_text_color": "#000000",
+    "trg1_font_family": "Segoe UI",
+    "trg1_font_size": 19,
+    "trg1_text_color": "#000000",
+    "trg2_font_family": "Segoe UI",
+    "trg2_font_size": 19,
+    "trg2_text_color": "#000000"
 }
 
 def load_config():

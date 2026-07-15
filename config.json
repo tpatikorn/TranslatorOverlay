@@ -1,7 +1,7 @@
 {
     "source_lang": "th",
-    "target_lang1": "zh-CN",
-    "target_lang2": "",
+    "target_lang1": "en",
+    "target_lang2": "zh-CN",
     "position": "top-right",
     "device_index": null,
     "bottom_offset": 0,
@@ -9,7 +9,19 @@
     "text_color": "#000000",
     "font_family": "Segoe UI",
     "font_size": 19,
-    "bg_opacity": 0.78,
-    "history_limit": 2,
-    "transcription_align": "middle"
+    "bg_opacity": 1.0,
+    "history_limit": 3,
+    "transcription_align": "right",
+    "asr_engine": "google",
+    "left_offset": 0,
+    "right_offset": 0,
+    "src_font_family": "TH Sarabun New",
+    "src_font_size": 15,
+    "src_text_color": "#000000",
+    "trg1_font_family": "Times New Roman",
+    "trg1_font_size": 12,
+    "trg1_text_color": "#000000",
+    "trg2_font_family": "Segoe UI",
+    "trg2_font_size": 13,
+    "trg2_text_color": "#000000"
 }

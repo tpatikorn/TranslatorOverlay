@@ -1,6 +1,49 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QFrame, QStyle
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QEvent
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QMouseEvent, QPainter, QColor
+
+class VolumeIndicator(QWidget):
+    """
+    Lightweight volume level visualizer using QPainter.
+    Draws a cellular signal-strength-like meter (5 progressive bars).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(35, 16)
+        self.volume_level = 0.0  # Normalized (0.0 to 1.0)
+        
+    def set_volume(self, level: float):
+        self.volume_level = level
+        self.update()  # Triggers paintEvent
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        num_bars = 5
+        bar_width = 4
+        bar_gap = 2
+        max_height = self.height()
+        
+        # Calculate active bars based on volume_level
+        active_bars = int(self.volume_level * num_bars)
+        if self.volume_level > 0.01 and active_bars == 0:
+            active_bars = 1  # Show at least 1 bar if there's any audible sound
+            
+        for i in range(num_bars):
+            # Compute x position
+            x = i * (bar_width + bar_gap)
+            # Progressive height (from 20% to 100% height)
+            bar_h = int(max_height * ((i + 1) / num_bars))
+            y = max_height - bar_h
+            
+            if i < active_bars:
+                # Active color: Cyan (#06B6D4)
+                painter.fillRect(x, y, bar_width, bar_h, QColor("#06B6D4"))
+            else:
+                # Inactive color: Translucent white (15% opacity)
+                painter.fillRect(x, y, bar_width, bar_h, QColor(255, 255, 255, 38))
+
 
 class ControlMenu(QWidget):
     """
@@ -114,15 +157,19 @@ class ControlMenu(QWidget):
             }
         """)
         
+        # Volume level indicator using QPainter
+        self.volume_indicator = VolumeIndicator(self)
+
         # Assemble
         container_layout.addWidget(self.label_title)
+        container_layout.addWidget(self.volume_indicator)
         container_layout.addWidget(self.separator)
         container_layout.addWidget(self.btn_pause)
         container_layout.addWidget(self.btn_settings)
         container_layout.addWidget(self.btn_exit)
         
         layout.addWidget(self.container)
-        self.setFixedSize(430, 48)
+        self.setFixedSize(500, 48)
 
     def get_button_style(self, is_pause=False, active=True):
         if is_pause:
@@ -255,3 +302,10 @@ class ControlMenu(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent):
         self.drag_position = None
         super().mouseReleaseEvent(event)
+
+    def update_volume(self, level: float):
+        """Update the visual state of the volume indicator."""
+        if self.paused:
+            self.volume_indicator.set_volume(0.0)
+        else:
+            self.volume_indicator.set_volume(level)

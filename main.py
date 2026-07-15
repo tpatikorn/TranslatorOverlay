@@ -55,6 +55,12 @@ def main():
     # 1. Update subtitles on overlay when transcription occurs
     pipeline_thread.transcription_updated.connect(overlay.update_text)
     
+    # 1.5. Update volume indicator on control menu
+    pipeline_thread.volume_updated.connect(control_menu.update_volume)
+    
+    # 1.75. Relocate control menu when overlay geometry updates dynamically
+    overlay.geometry_updated.connect(control_menu.position_near_overlay)
+    
     # 2. Update Control Menu title bar with thread status (e.g. Listening, Transcribing, Paused)
     def update_menu_status(status_text):
         control_menu.label_title.setText(f"Overlay Captioner ({status_text})")
@@ -96,18 +102,17 @@ def main():
     def handle_open_settings():
         global config
         
-        # Save current overlay text state to restore after closing settings UI
-        orig_text, orig_translations = overlay.get_current_text()
-        
         # Open modal settings dialog, passing overlay so it can update previews
         dialog = SettingsDialog(current_config=config, overlay=overlay, parent=control_menu)
         
-        def apply_changes(updated_config):
+        def apply_changes(updated_config, write_to_disk=True):
             global config
             old_device = config.get("device_index")
+            old_engine = config.get("asr_engine", "google")
             
-            # Save configuration locally
-            save_config(updated_config)
+            # Save configuration locally only on Save Settings
+            if write_to_disk:
+                save_config(updated_config)
             
             # If input device index or language changed, update pipeline thread
             pipeline_thread.update_config(updated_config)
@@ -121,19 +126,21 @@ def main():
             # Update local global reference
             config = updated_config
             
-            # Restart pipeline thread if device index has changed to apply configuration
-            if updated_config["device_index"] != old_device:
-                print("Audio device changed. Restarting audio stream...")
+            # Restart pipeline thread if device index or ASR engine has changed to apply configuration
+            if updated_config["device_index"] != old_device or updated_config.get("asr_engine", "google") != old_engine:
+                print("Audio device or ASR engine changed. Restarting audio stream...")
                 pipeline_thread.stop()
                 pipeline_thread.start()
                 
-        dialog.config_applied.connect(apply_changes)
+        dialog.config_applied.connect(lambda cfg: apply_changes(cfg, write_to_disk=False))
         
         if dialog.exec():
-            apply_changes(dialog.get_updated_config())
+            apply_changes(dialog.get_updated_config(), write_to_disk=True)
+        else:
+            apply_changes(dialog.original_config, write_to_disk=False)
             
-        # Settings UI closed - restore the original overlay text
-        overlay.update_text(orig_text, orig_translations)
+        # Settings UI closed - cleanly restore the overlay status/history views without duplicating messages
+        overlay.exit_preview_mode()
                 
     control_menu.btn_settings.clicked.connect(handle_open_settings)
     

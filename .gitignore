@@ -2,3 +2,4 @@ logs/
 .venv/
 .idea/
 __pycache__/
+models/
