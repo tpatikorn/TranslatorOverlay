@@ -1,0 +1,15 @@
+{
+    "source_lang": "th",
+    "target_lang1": "zh-CN",
+    "target_lang2": "",
+    "position": "top-right",
+    "device_index": null,
+    "bottom_offset": 0,
+    "bg_color": "rgba(255, 255, 255, 0.78)",
+    "text_color": "#000000",
+    "font_family": "Segoe UI",
+    "font_size": 19,
+    "bg_opacity": 0.78,
+    "history_limit": 2,
+    "transcription_align": "middle"
+}
